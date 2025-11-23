@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os/exec"
+	"time"
 )
 
 func main() {
@@ -43,6 +44,11 @@ func capturePackets(iface string, duration int, filter string) {
 		"-l",
 	}
 
+	startTime := time.Now()
+	bucketCounts := make([]int, 0)
+	currentBucket := 0
+	nextBucketTime := startTime.Add(1 * time.Minute)
+
 	if filter != "" {
 		args = append(args, "-f", filter)
 	}
@@ -70,6 +76,15 @@ func capturePackets(iface string, duration int, filter string) {
 	lineCount := 0
 	for scanner.Scan() {
 		line := scanner.Text()
+
+		now := time.Now()
+
+		for now.After(nextBucketTime) {
+			bucketCounts = append(bucketCounts, currentBucket)
+			currentBucket = 0
+			nextBucketTime = nextBucketTime.Add(1 * time.Minute)
+		}
+		currentBucket++
 		fmt.Println(line)
 		lineCount++
 	}
@@ -77,6 +92,20 @@ func capturePackets(iface string, duration int, filter string) {
 	if err := cmd.Wait(); err != nil {
 		fmt.Printf("tshark error: %v\n", err)
 	}
+
+	bucketCounts = append(bucketCounts, currentBucket)
+	elapsed := time.Since(startTime)
+
+	for i, count := range bucketCounts {
+    if i == len(bucketCounts)-1 {
+        remainingSeconds := int(elapsed.Seconds()) - i*60
+        if remainingSeconds < 60 {
+            fmt.Printf("Last %d seconds: %d protocols\n", remainingSeconds, count)
+			break
+        }
+    }
+    fmt.Printf("Minute %d: %d protocols\n", i+1, count)
+}
 
 	fmt.Println("---")
 	fmt.Printf("Capture complete. Total lines: %d\n", lineCount)
